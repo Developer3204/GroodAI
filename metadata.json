@@ -1,0 +1,8 @@
+{
+  "name": "GroodAI",
+  "description": "Smart food inventory tracker with receipt AI parsing, savings calculator, and environmental impact tracking.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": []
+}
