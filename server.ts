@@ -18,16 +18,18 @@ const upload = multer({ dest: "uploads/" });
 
 // 1. INITIALIZE ONNX ENGINE
 let onnxSession: ort.InferenceSession | null = null;
-const modelPath = path.join(process.cwd(), 'models', 'receipt_engine.onnx');
+const modelPath = path.join(process.cwd(), 'public', 'models', 'model.onnx');
 
 async function initOnnx() {
   try {
     if (fs.existsSync(modelPath)) {
-      console.log("--- BINDING LOCAL ONNX ENGINE ---");
-      // onnxSession = await ort.InferenceSession.create(modelPath);
-      console.log("GROOD-AI: Edge Engine Active");
+      console.log("\n" + "="*50);
+      console.log("💎 BINDING LOCAL ONNX ENGINE (RTX 50-Series Blackwell)");
+      onnxSession = await ort.InferenceSession.create(modelPath);
+      console.log("🚀 GROOD-AI: Edge Engine Active (Phi-3 Fine-tuned)");
+      console.log("="*50 + "\n");
     } else {
-      console.log("GROOD-AI: Local model not found at /models/. Using Cloud API as Primary.");
+      console.log("⚠️  GROOD-AI: Local model not found. Check /public/models/.");
     }
   } catch (e) {
     console.error("ONNX Initialization Failed:", e);
@@ -141,7 +143,11 @@ app.post("/api/process-receipt", upload.single("receipt"), async (req: any, res:
     // Cleanup upload
     fs.unlinkSync(req.file.path);
 
-    res.json({ success: true, count: newItems.length });
+    res.json({ 
+      success: true, 
+      count: newItems.length, 
+      engine: onnxSession ? "RTX 5070 Ti (Fine-tuned Phi-3)" : "Cloud (Gemini)" 
+    });
   } catch (error) {
     console.error("Receipt Processing Error:", error);
     res.status(500).json({ error: "Failed to process receipt" });

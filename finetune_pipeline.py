@@ -1,70 +1,83 @@
 import os
-import sys
+import torch
+from transformers import (
+    AutoModelForCausalLM, 
+    AutoTokenizer, 
+    TrainingArguments,
+    Trainer,
+    DataCollatorForLanguageModeling
+)
+from peft import LoraConfig, get_peft_model
+from datasets import Dataset
 
-# Windows Encoding Fix for AI Libraries
+# Fix for Windows Encoding
 os.environ["PYTHONUTF8"] = "1"
 
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer
-from datasets import load_dataset
-
-# 1. LOAD MODEL & TOKENIZER
+# 1. LOAD MODEL & TOKENIZER (CPU Optimized)
 model_id = "microsoft/Phi-3-mini-4k-instruct"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 tokenizer.pad_token = tokenizer.eos_token
 
-# 2. QUANTIZE & PREPARE (Optimized for RTX 4060)
-# Note: Requires 'bitsandbytes' library
+print("\n--- 🚀 INITIALIZING STABLE i9 ENGINE ---")
 model = AutoModelForCausalLM.from_pretrained(
     model_id, 
-    device_map="auto", 
-    trust_remote_code=True, 
-    load_in_4bit=True
+    device_map={"": "cpu"},
+    torch_dtype=torch.float32,
+    trust_remote_code=True
 )
-model = prepare_model_for_kbit_training(model)
 
-# 3. LORA CONFIG (The 'Secret' ML Sauce)
+# 2. LORA CONFIG (FIXED FOR PHI-3)
 lora_config = LoraConfig(
-    r=16,
-    lora_alpha=32,
-    target_modules=["q_proj", "v_proj", "k_proj"],
+    r=8, 
+    lora_alpha=16,
+    target_modules=["qkv_proj"], # Fixed: Phi-3 uses combined qkv_proj
     lora_dropout=0.05,
     bias="none",
     task_type="CAUSAL_LM"
 )
 model = get_peft_model(model, lora_config)
 
-# 4. DATASET (Mocking the SROIE dataset structure)
-# In production: dataset = load_dataset("daca-f/sroie-receipts")
-dataset = [
+# 3. DATASET
+data = [
     {"text": "### Receipt: MILK $2.50 ### JSON: [{'item': 'Milk', 'price': 2.5}]"},
-    {"text": "### Receipt: EGGS $4.99 ### JSON: [{'item': 'Eggs', 'price': 4.99}]"}
+    {"text": "### Receipt: EGGS $4.99 ### JSON: [{'item': 'Eggs', 'price': 4.99}]"},
+    {"text": "### Receipt: BREAD $3.25 ### JSON: [{'item': 'Bread', 'price': 3.25}]"},
+    {"text": "### Receipt: APPLE $1.20 ### JSON: [{'item': 'Apple', 'price': 1.20}]"}
 ]
+dataset = Dataset.from_list(data)
 
-# 5. TRAINING ARGUMENTS
+def tokenize_function(examples):
+    return tokenizer(examples["text"], padding="max_length", truncation=True, max_length=128)
+
+tokenized_dataset = dataset.map(tokenize_function, batched=True)
+
+# 4. TRAINING ARGUMENTS
 training_args = TrainingArguments(
     output_dir="./grood-phi3-finetuned",
-    per_device_train_batch_size=2,
-    gradient_accumulation_steps=4,
+    per_device_train_batch_size=1, 
+    gradient_accumulation_steps=1,
     learning_rate=2e-4,
-    max_steps=100, # Short run for hackathon demo
-    fp16=True,
-    logging_steps=10,
-    push_to_hub=False,
+    max_steps=20, 
+    use_cpu=True,
+    logging_steps=5,
+    report_to="none"
 )
 
-# 6. START TRAINING
-print("--- STARTING LOCAL FINE-TUNING ON RTX 4060 ---")
-# trainer = SFTTrainer(
-#     model=model,
-#     train_dataset=dataset,
-#     dataset_text_field="text",
-#     args=training_args,
-# )
-# trainer.train()
+# 5. START TRAINING
+print("\n--- 🧠 TRAINING ON i9 CPU ---")
+print("Module 'qkv_proj' targeted. This is the correct Phi-3 structure.")
+trainer = Trainer(
+    model=model,
+    train_dataset=tokenized_dataset,
+    args=training_args,
+    data_collator=DataCollatorForLanguageModeling(tokenizer, mlm=False),
+)
 
-print("\n--- NEXT STEPS FOR EXPORT ---")
-print("1. Merge LoRA weights into base model")
-print("2. Run: optimum-cli export onnx --model ./merged-model --task text-generation ./onnx_export/")
+trainer.train()
+
+# 6. SAVE
+print("\n--- 💾 SAVING TO: ./grood-phi3-finetuned ---")
+model.save_pretrained("./grood-phi3-finetuned")
+tokenizer.save_pretrained("./grood-phi3-finetuned")
+
+print("\n🏆 SUCCESS! i9 TRAINING COMPLETE.")
