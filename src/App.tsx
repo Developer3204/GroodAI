@@ -48,10 +48,15 @@ export default function App() {
   const fetchData = async () => {
     try {
       const res = await fetch('/api/data');
+      if (!res.ok) {
+        const text = await res.text();
+        console.error(`API Error (${res.status}):`, text);
+        return;
+      }
       const d = await res.json();
       setData(d);
     } catch (err) {
-      console.error(err);
+      console.error("Fetch Data Error:", err);
     } finally {
       setLoading(false);
     }
@@ -61,10 +66,51 @@ export default function App() {
     fetchData();
   }, []);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const [showCamera, setShowCamera] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  const startCamera = async () => {
+    setShowCamera(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment' } 
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (err) {
+      console.error("Camera access error:", err);
+      setShowCamera(false);
+    }
+  };
+
+  const stopCamera = () => {
+    const stream = videoRef.current?.srcObject as MediaStream;
+    stream?.getTracks().forEach(track => track.stop());
+    setShowCamera(false);
+  };
+
+  const capturePhoto = async () => {
+    if (videoRef.current && canvasRef.current) {
+      const context = canvasRef.current.getContext('2d');
+      if (context) {
+        canvasRef.current.width = videoRef.current.videoWidth;
+        canvasRef.current.height = videoRef.current.videoHeight;
+        context.drawImage(videoRef.current, 0, 0);
+        
+        canvasRef.current.toBlob(async (blob) => {
+          if (blob) {
+            const file = new File([blob], "capture.jpg", { type: "image/jpeg" });
+            stopCamera();
+            await processReceipt(file);
+          }
+        }, 'image/jpeg');
+      }
+    }
+  };
+
+  const processReceipt = async (file: File) => {
     setProcessing(true);
     const formData = new FormData();
     formData.append('receipt', file);
@@ -83,6 +129,12 @@ export default function App() {
       setProcessing(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await processReceipt(file);
   };
 
   const handleAction = async (itemId: string, action: 'consumed' | 'wasted') => {
@@ -129,25 +181,35 @@ export default function App() {
             <h1 className="text-xl font-bold tracking-tight">GroodAI</h1>
           </div>
           
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            disabled={processing}
-            className="group relative inline-flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-full text-sm font-medium hover:bg-slate-800 transition-all disabled:opacity-50"
-          >
-            {processing ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Receipt className="w-4 h-4" />
-            )}
-            {processing ? 'Analyzing...' : 'Snap Receipt'}
-            <input 
-              type="file" 
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              className="hidden" 
-              accept="image/*"
-            />
-          </button>
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={startCamera}
+              disabled={processing}
+              className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors disabled:opacity-50"
+              title="Camera Scan"
+            >
+              <Camera className="w-5 h-5" />
+            </button>
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              disabled={processing}
+              className="group relative inline-flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-full text-sm font-medium hover:bg-slate-800 transition-all disabled:opacity-50"
+            >
+              {processing ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Receipt className="w-4 h-4" />
+              )}
+              {processing ? 'Analyzing...' : 'Snap Receipt'}
+              <input 
+                type="file" 
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                className="hidden" 
+                accept="image/*"
+              />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -177,16 +239,27 @@ export default function App() {
             transition={{ delay: 0.1 }}
             className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm"
           >
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2 bg-emerald-50 rounded-xl">
-                <Leaf className="w-5 h-5 text-emerald-500" />
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-50 rounded-xl">
+                  <Leaf className="w-5 h-5 text-emerald-500" />
+                </div>
+                <span className="text-sm font-medium text-slate-500">Eco-Impact</span>
               </div>
-              <span className="text-sm font-medium text-slate-500">Carbon Avoided</span>
+              <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">Level 1</span>
             </div>
-            <div className="flex items-baseline gap-1">
+            <div className="flex items-baseline gap-1 mb-4">
               <span className="text-4xl font-bold text-slate-900">{data.totalCarbonAvoided.toFixed(1)}kg</span>
-              <span className="text-slate-400 text-sm">CO₂e emissions</span>
+              <span className="text-slate-400 text-sm">CO₂e avoided</span>
             </div>
+            {/* Progress Bar */}
+            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+              <div 
+                className="bg-emerald-500 h-full transition-all duration-1000" 
+                style={{ width: `${Math.min((data.totalCarbonAvoided / 10) * 100, 100)}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-slate-400 mt-2">Final goal: 10kg saved this month</p>
           </motion.div>
         </div>
 
@@ -297,6 +370,52 @@ export default function App() {
           )}
         </div>
       </main>
+
+      {/* Camera Modal */}
+      <AnimatePresence>
+        {showCamera && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center"
+          >
+            <div className="relative w-full max-w-2xl aspect-[3/4] bg-slate-900 overflow-hidden">
+              <video 
+                ref={videoRef} 
+                autoPlay 
+                playsInline 
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 border-2 border-dashed border-white/30 pointer-events-none m-8" />
+            </div>
+
+            <canvas ref={canvasRef} className="hidden" />
+
+            <div className="mt-8 flex items-center gap-8">
+              <button 
+                onClick={stopCamera}
+                className="w-14 h-14 flex items-center justify-center rounded-full bg-slate-800 text-white hover:bg-slate-700 transition-colors"
+                title="Cancel"
+              >
+                <Plus className="w-6 h-6 rotate-45" />
+              </button>
+              
+              <button 
+                onClick={capturePhoto}
+                className="w-20 h-20 bg-white rounded-full flex items-center justify-center border-4 border-slate-300 active:scale-95 transition-transform"
+                title="Capture"
+              >
+                <div className="w-16 h-16 rounded-full border-2 border-slate-900" />
+              </button>
+
+              <div className="w-14" /> {/* Spacer */}
+            </div>
+            
+            <p className="mt-6 text-white/60 text-sm font-medium">Align receipt within the frame</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Floating Indicator */}
       {processing && (

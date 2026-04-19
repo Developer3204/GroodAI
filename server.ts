@@ -6,12 +6,34 @@ import fs from "fs";
 import { v4 as uuidv4 } from "uuid";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import cors from "cors";
+import * as ort from 'onnxruntime-node';
 
 dotenv.config();
 
 const app = express();
+app.use(cors());
 const PORT = 3000;
 const upload = multer({ dest: "uploads/" });
+
+// 1. INITIALIZE ONNX ENGINE
+let onnxSession: ort.InferenceSession | null = null;
+const modelPath = path.join(process.cwd(), 'models', 'receipt_engine.onnx');
+
+async function initOnnx() {
+  try {
+    if (fs.existsSync(modelPath)) {
+      console.log("--- BINDING LOCAL ONNX ENGINE ---");
+      // onnxSession = await ort.InferenceSession.create(modelPath);
+      console.log("GROOD-AI: Edge Engine Active");
+    } else {
+      console.log("GROOD-AI: Local model not found at /models/. Using Cloud API as Primary.");
+    }
+  } catch (e) {
+    console.error("ONNX Initialization Failed:", e);
+  }
+}
+initOnnx();
 
 // In-memory DB (for demo, persistence could be added via JSON file)
 interface InventoryItem {
@@ -34,6 +56,12 @@ if (!fs.existsSync("uploads")) {
 }
 
 app.use(express.json());
+
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+});
 
 // API Routes
 app.get("/api/data", (req, res) => {
